@@ -16,7 +16,6 @@ download the TypeScript compiler.
 varis-ts/
 ├── package.json            Private workspace root. Scripts run across packages.
 ├── tsconfig.base.json      Shared compiler options. Both packages extend it.
-├── openapi.yaml            The Varis API description.
 ├── packages/sdk/
 │   ├── src/index.ts        Varis, Services, and define.
 │   ├── src/types.ts        ServiceDefinition, ServiceType, ServiceStatus, ServiceCategory.
@@ -93,11 +92,12 @@ tests on every pull request.
   `src/types.ts` first. The generator reports its type errors automatically.
   Change the generator only when a type can't express the rule.
 - `ServiceCategory` is the source of truth for categories. `ServiceCategory` in
-  `openapi.yaml` and the `service_categories` rows in the private `varis`
-  database mirror it, and `varis build` type-checks against it, so a slug
-  missing from the database builds cleanly and then fails at publish. Adding a
-  value means a data migration in `varis` in the same change. Adding is safe;
-  renaming or removing one isn't.
+  `openapi.yaml`, in the `usevaris/docs` repository, and the
+  `service_categories` rows in the private `varis` database mirror it, and
+  `varis build` type-checks against it, so a slug missing from the database
+  builds cleanly and then fails at publish. Adding a value means a data
+  migration in `varis` in the same change. Adding is safe; renaming or
+  removing one isn't.
 
 ### The generator
 
