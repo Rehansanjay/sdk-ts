@@ -201,7 +201,8 @@ Varis caller may see, and never serve one user's private data to it.
 - **Keep every `slug` unique** in the project. Never change an existing slug; it
   is permanent. To replace a service, define a new slug.
 - **Set `price_cents` in US cents.** `3` means three cents per call. Leave it
-  out, or set `0`, for a free service.
+  out, or set `0`, for a free service. Agents pay this plus the 5% Varis fee;
+  the provider receives all of it.
 - **Use only the public API**: `Varis`, `services.define`, `verifyRequest`,
   `VarisKeyFetchError`, and the exported types `ServiceDefinition`,
   `ServiceType`, `ServiceMethod`, `ServiceStatus`, and `VarisOptions`.
