@@ -22,3 +22,10 @@ export const TEST_REQUEST_ID_PREFIX = "var_tst_req_";
 
 /** Where the CLI serves a test run's public key. One fixed address only. */
 export const LOCAL_TEST_KEY_URL = "http://127.0.0.1:47823/varis-test-key";
+
+/**
+ * Where a `varis test` run takes the notifications for its test call, as
+ * `?invocation_id=<id>`. Must match the CLI's listener.
+ */
+export const LOCAL_TEST_NOTIFICATIONS_URL =
+  "http://127.0.0.1:47823/varis-test-notifications";
