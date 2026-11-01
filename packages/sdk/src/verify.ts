@@ -41,6 +41,7 @@ import {
   TEST_REQUEST_ID_PREFIX,
   VARIS_SIGNING_KEYS_URL,
 } from "./constants.js";
+import type { RequestParts } from "./request-parts.js";
 
 /** One public key, in the shape the signing keys endpoint returns. */
 export interface VarisPublicKey {
@@ -94,10 +95,10 @@ export class RequestVerifier {
       DEFAULT_MAX_CLOCK_SKEW_SECONDS;
   }
 
-  async verify(request: Request): Promise<boolean> {
-    const signatureHeader = request.headers.get("x-varis-signature");
-    const timestampHeader = request.headers.get("x-varis-timestamp");
-    const kid = request.headers.get("x-varis-key-id");
+  async verify(request: RequestParts): Promise<boolean> {
+    const signatureHeader = request.header("x-varis-signature");
+    const timestampHeader = request.header("x-varis-timestamp");
+    const kid = request.header("x-varis-key-id");
     if (!signatureHeader || !timestampHeader) return false;
 
     if (!/^\d+$/.test(timestampHeader)) return false;
@@ -107,17 +108,13 @@ export class RequestVerifier {
     const signature = decodeBase64(signatureHeader);
     if (!signature || signature.length !== SIGNATURE_BYTES) return false;
 
-    if (request.bodyUsed) {
-      throw new TypeError("Call verifyRequest before reading the request body.");
-    }
-    // Read a clone, so the caller can still read the original body.
-    const body = new Uint8Array(await request.clone().arrayBuffer());
+    const body = await request.readBody();
 
     // A test request carries both markers; a gateway request carries
     // neither. The request ID isn't signed, so it only routes and
     // cross-checks: the signature, against a key only the local CLI holds,
     // is what proves the request.
-    const requestId = request.headers.get("x-varis-request-id") ?? "";
+    const requestId = request.header("x-varis-request-id") ?? "";
     const isTestKey = kid === TEST_KEY_ID;
     if (isTestKey !== requestId.startsWith(TEST_REQUEST_ID_PREFIX)) {
       return false;
@@ -130,11 +127,10 @@ export class RequestVerifier {
 
     // The signed bytes are UTF-8
     // `${timestamp}.${method}.${pathAndQuery}.${rawBody}`. The path and
-    // query come from the URL as received, still percent-encoded. The body
-    // is used byte for byte, never decoded and re-encoded.
-    const url = new URL(request.url);
+    // query are as received, still percent-encoded. The body is used byte
+    // for byte, never decoded and re-encoded.
     const prefix = encoder.encode(
-      `${timestampHeader}.${request.method}.${url.pathname}${url.search}.`,
+      `${timestampHeader}.${request.method}.${request.pathAndQuery}.`,
     );
     const signed = new Uint8Array(prefix.length + body.length);
     signed.set(prefix);

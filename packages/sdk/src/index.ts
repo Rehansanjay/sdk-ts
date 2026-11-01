@@ -1,4 +1,5 @@
 import type { ServiceDefinition } from "./types.js";
+import { readRequestParts } from "./request-parts.js";
 import { RequestVerifier, type VarisOptions } from "./verify.js";
 
 export type {
@@ -44,6 +45,6 @@ export class Varis {
    * `VarisKeyFetchError` only when the signing keys can't be loaded.
    */
   verifyRequest(request: Request): Promise<boolean> {
-    return this.#verifier.verify(request);
+    return this.#verifier.verify(readRequestParts(request));
   }
 }
