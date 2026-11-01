@@ -43,10 +43,17 @@ In the handler that serves the service, reject any request Varis didn't sign
 before you read the body:
 
 ```ts
-if (!(await varis.verifyRequest(request))) {
+if (!(await varis.requests.verify(request))) {
   return new Response("Unauthorized", { status: 401 });
 }
 ```
+
+`requests.verify` takes a Web `Request` or a Node.js `req`, such as
+Express's. For a Node.js `req`, register a JSON body parser such as
+`express.json()` first.
+
+`verifyRequest` is deprecated. It calls `requests.verify`, logs a warning
+once, and is removed in 2.0.0.
 
 ## Documentation
 

@@ -7,7 +7,7 @@ download the TypeScript compiler.
 
 | Package | Directory | Purpose |
 | --- | --- | --- |
-| `@usevaris/sdk` | `packages/sdk` | Runs in the developer's server. Exports `Varis`, `services.define`, and `verifyRequest`. |
+| `@usevaris/sdk` | `packages/sdk` | Runs in the developer's server. Exports `Varis`, with `services.define` and `requests.verify`. |
 | `@usevaris/build` | `packages/build` | The generator. The Varis CLI runs it on demand with `npx --yes @usevaris/build@<major>`. Developers never install it. |
 
 ## Layout
@@ -17,9 +17,11 @@ varis-ts/
 ├── package.json            Private workspace root. Scripts run across packages.
 ├── tsconfig.base.json      Shared compiler options. Both packages extend it.
 ├── packages/sdk/
-│   ├── src/index.ts        Varis, Services, and define.
+│   ├── src/index.ts        Varis, Services, define, and the deprecated verifyRequest.
 │   ├── src/types.ts        ServiceDefinition, ServiceType, ServiceStatus, ServiceCategory.
-│   ├── src/verify.ts       verifyRequest, VarisOptions, VarisKeyFetchError.
+│   ├── src/requests.ts     varis.requests: verify.
+│   ├── src/request-parts.ts  Reads a Web Request or a Node.js req the same way.
+│   ├── src/verify.ts       The signature check, VarisOptions, VarisKeyFetchError.
 │   ├── src/constants.ts    VARIS_API_ORIGIN and VARIS_SIGNING_KEYS_URL.
 │   ├── docs/agents.md      Shipped instructions for coding agents in developers' projects.
 │   └── test/

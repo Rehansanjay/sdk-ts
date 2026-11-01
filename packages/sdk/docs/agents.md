@@ -12,11 +12,12 @@ discover and pay to call. The SDK has two methods:
 - `services.define` does nothing at runtime. `varis build` reads every
   `define` call from source, without running the code, and writes
   `varis.json`.
-- `verifyRequest` checks that the Varis gateway signed a request to your
+- `requests.verify` checks that the Varis gateway signed a request to your
   endpoint.
 
 The SDK needs no API key, token, or environment variable. Never add one. Its
-only network request is `verifyRequest` fetching Varis's public signing keys.
+only network request is `requests.verify` fetching Varis's public signing
+keys.
 
 ## Declare a service
 
@@ -103,14 +104,14 @@ query string; declare those values as `Input` fields instead.
 
 ## Verify every request
 
-Anyone can call your endpoint URL directly. `verifyRequest` confirms that
+Anyone can call your endpoint URL directly. `requests.verify` confirms that
 Varis sent the request, so you serve only calls that Varis bills for.
 
 Export the handler for the service's `method`: `GET` for a `GET` service,
 `POST` for a `POST` service. In it:
 
-1. Call `varis.verifyRequest(request)` first, before anything else reads the
-   request.
+1. Call `varis.requests.verify(request)` first, before anything else reads
+   the request.
 2. Await the result.
 3. If the result is `false`, return a `401` response.
 4. Let `VarisKeyFetchError` propagate so that your framework returns a `500`
@@ -125,7 +126,7 @@ import { Varis } from "@usevaris/sdk";
 const varis = new Varis();
 
 export async function GET(request: Request): Promise<Response> {
-  if (!(await varis.verifyRequest(request))) {
+  if (!(await varis.requests.verify(request))) {
     return new Response("Unauthorized", { status: 401 });
   }
   const params = new URL(request.url).searchParams;
@@ -139,6 +140,34 @@ export async function GET(request: Request): Promise<Response> {
 For a `POST` service, export `POST` and read `await request.json()` after
 verifying.
 
+### Express and other Node.js servers
+
+`requests.verify` also takes a Node.js `req`, such as Express's. Register a
+JSON body parser, such as `express.json()`, before the route, and pass `req`
+as it is:
+
+```ts
+import express from "express";
+import { Varis } from "@usevaris/sdk";
+
+const varis = new Varis();
+const app = express();
+app.use(express.json());
+
+app.post("/v1/summarise", async (req, res) => {
+  if (!(await varis.requests.verify(req))) {
+    return res.status(401).json({ message: "Unauthorised" });
+  }
+  // Handle the call with req.body.
+});
+```
+
+- `requests.verify` rebuilds the signed body from `req.body`, or uses
+  `req.rawBody` when a parser keeps the raw bytes. Without a body parser, it
+  throws a `TypeError` for a signed `POST` request.
+- It reads the path from `req.originalUrl`, so it works inside a router
+  mounted with `app.use("/v1", router)`.
+
 ### When the route also serves your own users
 
 If the route already serves signed-in users, add Varis as a second way in
@@ -147,7 +176,7 @@ existing authentication:
 
 ```ts
 export async function GET(request: Request): Promise<Response> {
-  const isVaris = await varis.verifyRequest(request);
+  const isVaris = await varis.requests.verify(request);
   if (!isVaris && !(await isSignedIn(request))) {
     return new Response("Unauthorized", { status: 401 });
   }
@@ -161,17 +190,19 @@ Varis caller may see, and never serve one user's private data to it.
 
 - Create one `Varis` instance per module and reuse it. It caches the signing
   keys.
-- Pass the standard `Request` object. `verifyRequest` reads a clone of the
-  body, so the body stays readable afterward.
+- Pass the standard `Request` object, or a Node.js `req`. For a `Request`,
+  `requests.verify` reads a clone of the body, so the body stays readable
+  afterward. It remembers its answer for each request, so calling it again
+  costs nothing.
 - Never parse, re-serialize, or modify the body before verifying. The
   signature covers the exact bytes Varis sent.
 - The signature also covers the method, path, and query string. Don't rewrite
   the path before verifying, for example in middleware that strips a prefix;
   verify with the request as it arrived. A proxy that changes only the host is
   fine.
-- `verifyRequest` returns `false` for unsigned, expired, or tampered requests.
-  It doesn't throw for them.
-- `varis test` requests need nothing extra. `verifyRequest` recognises them
+- `requests.verify` returns `false` for unsigned, expired, or tampered
+  requests. It doesn't throw for them.
+- `varis test` requests need nothing extra. `requests.verify` recognises them
   and checks them with a key from the `varis test` run on the same machine,
   and rejects them anywhere else, including production. Their request IDs,
   in `X-Varis-Request-Id`, start with `var_tst_req_`; real calls start with
@@ -203,9 +234,13 @@ Varis caller may see, and never serve one user's private data to it.
 - **Set `price_cents` in US cents.** `3` means three cents per call. Leave it
   out, or set `0`, for a free service. Agents pay this plus the 5% Varis fee;
   the provider receives all of it.
-- **Use only the public API**: `Varis`, `services.define`, `verifyRequest`,
+- **Use only the public API**: `Varis`, `services.define`, `requests.verify`,
   `VarisKeyFetchError`, and the exported types `ServiceDefinition`,
-  `ServiceType`, `ServiceMethod`, `ServiceStatus`, and `VarisOptions`.
+  `ServiceType`, `ServiceMethod`, `ServiceStatus`, `VarisOptions`,
+  `VarisRequest`, `NodeRequest`, and `NodeResponse`.
+- **Replace `verifyRequest` with `requests.verify`** wherever you see it.
+  `verifyRequest` is deprecated, logs a warning, and is removed in 2.0.0. The
+  two take the same argument and give the same answer.
 
 ## Fields
 

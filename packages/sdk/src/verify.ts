@@ -3,11 +3,16 @@
  *
  * SIGNING FORMAT (must match lib/crypto/signing.ts in the private varis repo)
  * - `x-varis-timestamp`: Unix time in whole seconds.
+ * - `x-varis-invocation-id`: the invocation the request is for.
  * - `x-varis-signature`: base64 Ed25519 signature over the UTF-8 bytes of
- *   `${timestamp}.${method}.${pathAndQuery}.${rawBody}`, where `method` is
- *   GET or POST, `pathAndQuery` is the request path and query exactly as
- *   received (no host), and `rawBody` is empty for GET.
+ *   `${timestamp}.${invocationId}.${method}.${pathAndQuery}.${rawBody}`,
+ *   where `method` is GET or POST, `pathAndQuery` is the request path and
+ *   query exactly as received (no host), and `rawBody` is empty for GET.
  * - `x-varis-key-id`: the `kid` of the key that signed it.
+ *
+ * Until 2.0.0, a request that fails that check, or has no invocation ID, is
+ * also checked against the string the gateway signed before the invocation
+ * ID was added: `${timestamp}.${method}.${pathAndQuery}.${rawBody}`.
  *
  * The path and query are signed so a captured request can't be replayed to
  * another endpoint or with a changed query. The host isn't, so a proxy that
@@ -125,27 +130,10 @@ export class RequestVerifier {
       : await this.#key(kid);
     if (!key) return false;
 
-    // The signed bytes are UTF-8
-    // `${timestamp}.${method}.${pathAndQuery}.${rawBody}`. The path and
-    // query are as received, still percent-encoded. The body is used byte
-    // for byte, never decoded and re-encoded.
-    const prefix = encoder.encode(
-      `${timestampHeader}.${request.method}.${request.pathAndQuery}.`,
-    );
-    const signed = new Uint8Array(prefix.length + body.length);
-    signed.set(prefix);
-    signed.set(body, prefix.length);
-
-    try {
-      return await crypto.subtle.verify(
-        { name: "Ed25519" },
-        key,
-        signature,
-        signed,
-      );
-    } catch {
-      return false;
+    for (const prefix of signedPrefixes(request, timestampHeader)) {
+      if (await verifySignature(key, signature, prefix, body)) return true;
     }
+    return false;
   }
 
   /**
@@ -206,6 +194,45 @@ export class RequestVerifier {
     }
     this.#keys = keys;
     this.#loaded = true;
+  }
+}
+
+/** Whether a request is signed with the `varis test` key, not a gateway key. */
+export function isTestRequest(request: RequestParts): boolean {
+  return request.header("x-varis-key-id") === TEST_KEY_ID;
+}
+
+/**
+ * What may precede the body in the signed bytes, newest first. The path and
+ * query are as received, still percent-encoded. Remove the old string in
+ * 2.0.0.
+ */
+function signedPrefixes(request: RequestParts, timestamp: string): string[] {
+  const invocationId = request.header("x-varis-invocation-id");
+  const old = `${timestamp}.${request.method}.${request.pathAndQuery}.`;
+  return invocationId
+    ? [
+      `${timestamp}.${invocationId}.${request.method}.${request.pathAndQuery}.`,
+      old,
+    ]
+    : [old];
+}
+
+/** Checks the signature over the prefix and the body, byte for byte. */
+async function verifySignature(
+  key: CryptoKey,
+  signature: Uint8Array<ArrayBuffer>,
+  prefix: string,
+  body: Uint8Array,
+): Promise<boolean> {
+  const head = encoder.encode(prefix);
+  const signed = new Uint8Array(head.length + body.length);
+  signed.set(head);
+  signed.set(body, head.length);
+  try {
+    return await crypto.subtle.verify({ name: "Ed25519" }, key, signature, signed);
+  } catch {
+    return false;
   }
 }
 

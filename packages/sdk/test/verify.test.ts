@@ -27,8 +27,10 @@ async function makeKey(kid: string): Promise<TestKey> {
 
 /**
  * Signs the way the gateway does: Ed25519 over UTF-8
- * `${timestamp}.${method}.${pathAndQuery}.${rawBody}`, with an empty body for
- * GET. `deliverTo` and `deliverAs` send the signed request somewhere else, the
+ * `${timestamp}.${invocationId}.${method}.${pathAndQuery}.${rawBody}`, with
+ * an empty body for GET. `legacy` signs the string from before the
+ * invocation ID, `${timestamp}.${method}.${pathAndQuery}.${rawBody}`.
+ * `deliverTo` and `deliverAs` send the signed request somewhere else, the
  * way a replayed request would arrive.
  */
 async function signedRequest(
@@ -41,6 +43,8 @@ async function signedRequest(
     url?: string;
     deliverTo?: string;
     deliverAs?: "GET" | "POST";
+    invocationId?: string;
+    legacy?: boolean;
   } = {},
 ): Promise<Request> {
   const method = options.method ?? "POST";
@@ -50,17 +54,20 @@ async function signedRequest(
   const timestamp = String(
     options.timestamp ?? Math.floor(Date.now() / 1000),
   );
+  const invocationId = options.invocationId ?? INVOCATION_ID;
+  const signedText = options.legacy
+    ? `${timestamp}.${method}.${pathname}${search}.${rawBody}`
+    : `${timestamp}.${invocationId}.${method}.${pathname}${search}.${rawBody}`;
   const signature = new Uint8Array(
     await crypto.subtle.sign(
       { name: "Ed25519" },
       key.privateKey,
-      new TextEncoder().encode(
-        `${timestamp}.${method}.${pathname}${search}.${rawBody}`,
-      ),
+      new TextEncoder().encode(signedText),
     ),
   );
   const headers: Record<string, string | null> = {
     ...(method === "POST" && { "content-type": "application/json" }),
+    "x-varis-invocation-id": invocationId,
     "x-varis-timestamp": timestamp,
     "x-varis-signature": btoa(String.fromCharCode(...signature)),
     "x-varis-key-id": key.kid,
@@ -89,19 +96,20 @@ function serveKeys(...responses: VarisPublicKey[][]) {
 }
 
 const BODY = JSON.stringify({ city: "Lagos", note: "café" });
+const INVOCATION_ID = "var_invk_00000000000001";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
-describe("Varis.verifyRequest", () => {
+describe("Varis.requests.verify", () => {
   it("accepts a correctly signed request", async () => {
     const key = await makeKey("k1");
     const fetchMock = serveKeys([key.publicKey]);
 
     const varis = new Varis();
-    expect(await varis.verifyRequest(await signedRequest(key, BODY))).toBe(true);
+    expect(await varis.requests.verify(await signedRequest(key, BODY))).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]![0]).toBe(VARIS_SIGNING_KEYS_URL);
   });
@@ -111,8 +119,8 @@ describe("Varis.verifyRequest", () => {
     const fetchMock = serveKeys([key.publicKey]);
     const varis = new Varis();
 
-    await varis.verifyRequest(await signedRequest(key, BODY));
-    await varis.verifyRequest(await signedRequest(key, BODY));
+    await varis.requests.verify(await signedRequest(key, BODY));
+    await varis.requests.verify(await signedRequest(key, BODY));
 
     expect(fetchMock).toHaveBeenCalledOnce();
   });
@@ -122,7 +130,7 @@ describe("Varis.verifyRequest", () => {
     const fetchMock = serveKeys([key.publicKey]);
     const keysUrl = "http://localhost:3000/.well-known/varis-signing-keys";
 
-    await new Varis({ keysUrl }).verifyRequest(await signedRequest(key, BODY));
+    await new Varis({ keysUrl }).requests.verify(await signedRequest(key, BODY));
 
     expect(fetchMock.mock.calls[0]![0]).toBe(keysUrl);
   });
@@ -137,7 +145,7 @@ describe("Varis.verifyRequest", () => {
       body: BODY.replace("Lagos", "Abuja"),
     });
 
-    expect(await new Varis().verifyRequest(tampered)).toBe(false);
+    expect(await new Varis().requests.verify(tampered)).toBe(false);
   });
 
   it("accepts a signed GET with its input in the query string", async () => {
@@ -149,7 +157,7 @@ describe("Varis.verifyRequest", () => {
       url: "https://provider.example.com/weather?city=Port+Harcourt&units=metric",
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(true);
+    expect(await new Varis().requests.verify(request)).toBe(true);
   });
 
   it("rejects a GET replayed with a changed query", async () => {
@@ -161,7 +169,7 @@ describe("Varis.verifyRequest", () => {
       deliverTo: "https://provider.example.com/weather?city=Abuja",
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("rejects a request replayed to another path", async () => {
@@ -171,7 +179,7 @@ describe("Varis.verifyRequest", () => {
       deliverTo: "https://provider.example.com/admin",
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("rejects a request replayed with another method", async () => {
@@ -183,7 +191,7 @@ describe("Varis.verifyRequest", () => {
       deliverAs: "POST",
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("accepts a request whose host was rewritten by a proxy", async () => {
@@ -194,7 +202,97 @@ describe("Varis.verifyRequest", () => {
       deliverTo: "http://internal-host:8080/weather",
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(true);
+    expect(await new Varis().requests.verify(request)).toBe(true);
+  });
+
+  describe("the signed string", () => {
+    it("rejects a request replayed under another invocation ID", async () => {
+      const key = await makeKey("k1");
+      serveKeys([key.publicKey]);
+      const request = await signedRequest(key, BODY, {
+        headers: { "x-varis-invocation-id": "var_invk_00000000000002" },
+      });
+
+      expect(await new Varis().requests.verify(request)).toBe(false);
+    });
+
+    it("falls back to the string from before the invocation ID", async () => {
+      const key = await makeKey("k1");
+      serveKeys([key.publicKey]);
+      const request = await signedRequest(key, BODY, { legacy: true });
+
+      expect(await new Varis().requests.verify(request)).toBe(true);
+    });
+
+    it("checks only the old string when there's no invocation ID", async () => {
+      const key = await makeKey("k1");
+      serveKeys([key.publicKey]);
+      const legacy = await signedRequest(key, BODY, {
+        legacy: true,
+        headers: { "x-varis-invocation-id": null },
+      });
+      const current = await signedRequest(key, BODY, {
+        headers: { "x-varis-invocation-id": null },
+      });
+
+      expect(await new Varis().requests.verify(legacy)).toBe(true);
+      expect(await new Varis().requests.verify(current)).toBe(false);
+    });
+  });
+
+  describe("a Node.js req", () => {
+    /**
+     * The Express req for a signed Web request, after express.json(). Inside
+     * a router mounted at `mountPath`, Express strips it from `url` only.
+     */
+    async function expressRequest(signed: Request, mountPath = "") {
+      const { pathname, search } = new URL(signed.url);
+      const text = await signed.text();
+      return {
+        method: signed.method,
+        url: `${pathname.slice(mountPath.length)}${search}`,
+        originalUrl: `${pathname}${search}`,
+        headers: Object.fromEntries(signed.headers),
+        body: text ? JSON.parse(text) : {},
+      };
+    }
+
+    it("accepts a signed POST after express.json()", async () => {
+      const key = await makeKey("k1");
+      serveKeys([key.publicKey]);
+      const body = JSON.stringify({ a: { b: [1, "é", { c: null }] }, n: -1.5 });
+      const req = await expressRequest(await signedRequest(key, body));
+
+      expect(await new Varis().requests.verify(req)).toBe(true);
+    });
+
+    it("accepts a signed GET inside a mounted router", async () => {
+      const key = await makeKey("k1");
+      serveKeys([key.publicKey]);
+      const signed = await signedRequest(key, "", {
+        method: "GET",
+        url: "https://provider.example.com/v1/weather?city=Port+Harcourt",
+      });
+
+      const req = await expressRequest(signed, "/v1");
+      expect(req.url).toBe("/weather?city=Port+Harcourt");
+      expect(await new Varis().requests.verify(req)).toBe(true);
+    });
+
+    it("rejects a tampered body", async () => {
+      const key = await makeKey("k1");
+      serveKeys([key.publicKey]);
+      const req = await expressRequest(await signedRequest(key, BODY));
+      req.body.city = "Abuja";
+
+      expect(await new Varis().requests.verify(req)).toBe(false);
+    });
+
+    it("returns false for an unsigned request without a body parser", async () => {
+      const req = { method: "POST", url: "/render", headers: {} };
+
+      expect(await new Varis().requests.verify(req)).toBe(false);
+    });
   });
 
   it("rejects a stale timestamp", async () => {
@@ -203,7 +301,7 @@ describe("Varis.verifyRequest", () => {
     const timestamp = Math.floor(Date.now() / 1000) - 301;
 
     const request = await signedRequest(key, BODY, { timestamp });
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("rejects a future timestamp", async () => {
@@ -212,7 +310,7 @@ describe("Varis.verifyRequest", () => {
     const timestamp = Math.floor(Date.now() / 1000) + 301;
 
     const request = await signedRequest(key, BODY, { timestamp });
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("honors maxClockSkewSeconds", async () => {
@@ -222,7 +320,7 @@ describe("Varis.verifyRequest", () => {
 
     const varis = new Varis({ maxClockSkewSeconds: 60 });
     expect(
-      await varis.verifyRequest(await signedRequest(key, BODY, { timestamp })),
+      await varis.requests.verify(await signedRequest(key, BODY, { timestamp })),
     ).toBe(false);
   });
 
@@ -233,9 +331,9 @@ describe("Varis.verifyRequest", () => {
     const fetchMock = serveKeys([k1.publicKey], [k1.publicKey, k2.publicKey]);
     const varis = new Varis();
 
-    expect(await varis.verifyRequest(await signedRequest(k1, BODY))).toBe(true);
+    expect(await varis.requests.verify(await signedRequest(k1, BODY))).toBe(true);
     vi.advanceTimersByTime(61_000);
-    expect(await varis.verifyRequest(await signedRequest(k2, BODY))).toBe(true);
+    expect(await varis.requests.verify(await signedRequest(k2, BODY))).toBe(true);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -247,12 +345,12 @@ describe("Varis.verifyRequest", () => {
     const fetchMock = serveKeys([k1.publicKey]);
     const varis = new Varis();
 
-    expect(await varis.verifyRequest(await signedRequest(k1, BODY))).toBe(true);
+    expect(await varis.requests.verify(await signedRequest(k1, BODY))).toBe(true);
     vi.advanceTimersByTime(61_000);
-    expect(await varis.verifyRequest(await signedRequest(rogue, BODY))).toBe(
+    expect(await varis.requests.verify(await signedRequest(rogue, BODY))).toBe(
       false,
     );
-    expect(await varis.verifyRequest(await signedRequest(rogue, BODY))).toBe(
+    expect(await varis.requests.verify(await signedRequest(rogue, BODY))).toBe(
       false,
     );
 
@@ -268,7 +366,7 @@ describe("Varis.verifyRequest", () => {
       const request = await signedRequest(key, BODY, {
         headers: { [name]: null },
       });
-      expect(await varis.verifyRequest(request)).toBe(false);
+      expect(await varis.requests.verify(request)).toBe(false);
     }
   });
 
@@ -279,7 +377,7 @@ describe("Varis.verifyRequest", () => {
     const request = await signedRequest(key, BODY, {
       headers: { "x-varis-key-id": null },
     });
-    expect(await new Varis().verifyRequest(request)).toBe(true);
+    expect(await new Varis().requests.verify(request)).toBe(true);
   });
 
   it("rejects a missing key ID when more than one key is known", async () => {
@@ -290,7 +388,7 @@ describe("Varis.verifyRequest", () => {
     const request = await signedRequest(k1, BODY, {
       headers: { "x-varis-key-id": null },
     });
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("rejects a malformed signature", async () => {
@@ -302,7 +400,7 @@ describe("Varis.verifyRequest", () => {
       const request = await signedRequest(key, BODY, {
         headers: { "x-varis-signature": signature },
       });
-      expect(await varis.verifyRequest(request)).toBe(false);
+      expect(await varis.requests.verify(request)).toBe(false);
     }
   });
 
@@ -311,7 +409,7 @@ describe("Varis.verifyRequest", () => {
     serveKeys([key.publicKey]);
     const request = await signedRequest(key, BODY);
 
-    expect(await new Varis().verifyRequest(request)).toBe(true);
+    expect(await new Varis().requests.verify(request)).toBe(true);
     expect(await request.json()).toEqual(JSON.parse(BODY));
   });
 
@@ -321,8 +419,8 @@ describe("Varis.verifyRequest", () => {
     const fetchMock = serveKeys([]);
     const varis = new Varis({ publicKeys: [key.publicKey] });
 
-    expect(await varis.verifyRequest(await signedRequest(key, BODY))).toBe(true);
-    expect(await varis.verifyRequest(await signedRequest(other, BODY))).toBe(
+    expect(await varis.requests.verify(await signedRequest(key, BODY))).toBe(true);
+    expect(await varis.requests.verify(await signedRequest(other, BODY))).toBe(
       false,
     );
     expect(fetchMock).not.toHaveBeenCalled();
@@ -336,7 +434,7 @@ describe("Varis.verifyRequest", () => {
       "fetch",
       vi.fn(async () => new Response("unavailable", { status: 503 })),
     );
-    await expect(new Varis().verifyRequest(request.clone())).rejects.toThrow(
+    await expect(new Varis().requests.verify(request.clone())).rejects.toThrow(
       VarisKeyFetchError,
     );
 
@@ -346,7 +444,7 @@ describe("Varis.verifyRequest", () => {
         throw new TypeError("fetch failed");
       }),
     );
-    await expect(new Varis().verifyRequest(request)).rejects.toThrow(
+    await expect(new Varis().requests.verify(request)).rejects.toThrow(
       VarisKeyFetchError,
     );
   });
@@ -382,7 +480,7 @@ describe("varis test requests", () => {
     const fetchMock = cliListening(key);
     const request = await signedRequest(key, BODY, { headers: testHeaders() });
 
-    expect(await new Varis().verifyRequest(request)).toBe(true);
+    expect(await new Varis().requests.verify(request)).toBe(true);
     expect(String(fetchMock.mock.calls[0]![0])).toBe(
       `${LOOPBACK}?request_id=${TEST_ID}`,
     );
@@ -395,7 +493,7 @@ describe("varis test requests", () => {
     }));
     const request = await signedRequest(key, BODY, { headers: testHeaders() });
 
-    await expect(new Varis().verifyRequest(request)).resolves.toBe(false);
+    await expect(new Varis().requests.verify(request)).resolves.toBe(false);
   });
 
   it("rejects a tampered test request", async () => {
@@ -408,7 +506,7 @@ describe("varis test requests", () => {
       body: BODY.replace("Lagos", "Abuja"),
     });
 
-    expect(await new Varis().verifyRequest(tampered)).toBe(false);
+    expect(await new Varis().requests.verify(tampered)).toBe(false);
   });
 
   it("rejects a test signature the CLI didn't make", async () => {
@@ -417,7 +515,7 @@ describe("varis test requests", () => {
     cliListening(served);
     const request = await signedRequest(forger, BODY, { headers: testHeaders() });
 
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("rejects a test key without a test request ID", async () => {
@@ -427,7 +525,7 @@ describe("varis test requests", () => {
       headers: { "x-varis-request-id": "var_req_4f0c2b8e" },
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -436,7 +534,7 @@ describe("varis test requests", () => {
     serveKeys([key.publicKey]);
     const request = await signedRequest(key, BODY, { headers: testHeaders() });
 
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("only takes the key the CLI serves for this request ID", async () => {
@@ -444,7 +542,7 @@ describe("varis test requests", () => {
     cliListening(key, "var_tst_req_someone_else");
     const request = await signedRequest(key, BODY, { headers: testHeaders() });
 
-    expect(await new Varis().verifyRequest(request)).toBe(false);
+    expect(await new Varis().requests.verify(request)).toBe(false);
   });
 
   it("verifies a GET test request with its query", async () => {
@@ -456,7 +554,7 @@ describe("varis test requests", () => {
       headers: testHeaders(),
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(true);
+    expect(await new Varis().requests.verify(request)).toBe(true);
   });
 
   it("still verifies gateway requests with their own request ID", async () => {
@@ -466,6 +564,6 @@ describe("varis test requests", () => {
       headers: { "x-varis-request-id": "var_req_4f0c2b8e" },
     });
 
-    expect(await new Varis().verifyRequest(request)).toBe(true);
+    expect(await new Varis().requests.verify(request)).toBe(true);
   });
 });
