@@ -63,6 +63,24 @@ export function computeResultFromResponse(
   }
 }
 
+/**
+ * The notification for what Web-style work resolved to: a `Response` is
+ * judged by `computeResultFromResponse`; any other value is the result.
+ */
+export async function computeResultFromValue(
+  value: unknown,
+): Promise<Notification> {
+  if (!isResponse(value)) return { status: "completed", result: value };
+  return computeResultFromResponse(value.status, await value.text());
+}
+
+/** Checked by shape: a framework may bring its own `Response` class. */
+function isResponse(value: unknown): value is Response {
+  const candidate = value as Partial<Response> | null;
+  return typeof candidate?.status === "number" &&
+    typeof candidate.text === "function";
+}
+
 /** What Express-style work sent, once Varis was already answered. */
 export interface CapturedResponse {
   statusCode: number;

@@ -55,7 +55,7 @@ export interface VarisPublicKey {
   public_key_pem: string;
 }
 
-/** Request verification settings. Varis never needs a credential. */
+/** The SDK's settings. Varis never needs a credential. */
 export interface VarisOptions {
   /** Where to fetch signing keys from. Defaults to the Varis API. For local development. */
   keysUrl?: string;
@@ -63,6 +63,12 @@ export interface VarisOptions {
   publicKeys?: VarisPublicKey[];
   /** How far a request's timestamp may be from now, in seconds. Defaults to 300. */
   maxClockSkewSeconds?: number;
+  /**
+   * Keeps a serverless function running until a long call's result is
+   * sent, such as `waitUntil` from `@vercel/functions` or
+   * `cloudflare:workers`. Next.js needs none: the SDK finds its own.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 /** Thrown when the signing keys can't be loaded. Respond with 500, not 401. */

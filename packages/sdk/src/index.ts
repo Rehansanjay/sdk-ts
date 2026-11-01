@@ -3,6 +3,7 @@ import { Requests } from "./requests.js";
 import type { ServiceDefinition } from "./types.js";
 import type { VarisOptions } from "./verify.js";
 
+export type { VarisNotificationDetails } from "./notifications.js";
 export type {
   NodeRequest,
   NodeResponse,

@@ -7,7 +7,7 @@ download the TypeScript compiler.
 
 | Package | Directory | Purpose |
 | --- | --- | --- |
-| `@usevaris/sdk` | `packages/sdk` | Runs in the developer's server. Exports `Varis`, with `services.define` and `requests.verify`. |
+| `@usevaris/sdk` | `packages/sdk` | Runs in the developer's server. Exports `Varis`, with `services.define` and `varis.requests`. |
 | `@usevaris/build` | `packages/build` | The generator. The Varis CLI runs it on demand with `npx --yes @usevaris/build@<major>`. Developers never install it. |
 
 ## Layout
@@ -19,10 +19,12 @@ varis-ts/
 ├── packages/sdk/
 │   ├── src/index.ts        Varis, Services, define, and the deprecated verifyRequest.
 │   ├── src/types.ts        ServiceDefinition, ServiceType, ServiceStatus, ServiceCategory.
-│   ├── src/requests.ts     varis.requests: verify.
+│   ├── src/requests.ts     varis.requests: verify, handleOnServer, delegateToWorker, handleInWorker.
 │   ├── src/request-parts.ts  Reads a Web Request or a Node.js req the same way.
+│   ├── src/notifications.ts  Sends started, running, completed, and failed to Varis.
+│   ├── src/responses.ts    Waits for the work's answer and captures a late Express one.
 │   ├── src/verify.ts       The signature check, VarisOptions, VarisKeyFetchError.
-│   ├── src/constants.ts    VARIS_API_ORIGIN and VARIS_SIGNING_KEYS_URL.
+│   ├── src/constants.ts    The Varis origin and the varis test loopback addresses.
 │   ├── docs/agents.md      Shipped instructions for coding agents in developers' projects.
 │   └── test/
 └── packages/build/
@@ -79,12 +81,23 @@ tests on every pull request.
   later, Deno, Bun, and Cloudflare Workers. Its `tsconfig.json` sets
   `"types": []` so that Node-only APIs fail to type check.
 - Keep the Varis hostname in `packages/sdk/src/constants.ts` only.
-- `Varis` never holds a credential. Its options configure request verification
-  only.
+- `Varis` never holds a credential. Its options configure request
+  verification, plus `waitUntil` for serverless platforms. The notification
+  token arrives with each request and lives only as long as that call.
+- Type a Node.js `req` and `res` structurally in `src/request-parts.ts`, so
+  an Express `req` and `res` are assignable without Node or Express types.
 - The signing format in `src/verify.ts` must match the gateway in the private
   `varis` repository (`lib/crypto/signing.ts` and
   `app/.well-known/varis-signing-keys/route.ts`). If you change one, change
   the other.
+- The notification format and timings in `src/notifications.ts` and
+  `src/requests.ts` must match the gateway in the private `varis` repository:
+  the route in `app/api/v1/invocations/[invocation_id]/notifications/` and
+  `PROVIDER_TIMEOUT_MS` in `app/api/v1/invocations/_lib/provider.ts`. If you
+  change one, change the other.
+- `LOCAL_TEST_NOTIFICATIONS_URL` and `LOCAL_TEST_KEY_URL` in
+  `src/constants.ts` must match the `varis test` listener in the `cli`
+  repository.
 - Change `packages/sdk/docs/agents.md` in the same commit as any public API
   change.
 - `packages/build/src/flat-input.ts` must match `lib/schema/flat-input.ts`

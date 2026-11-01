@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   computeResultFromResponse,
+  computeResultFromValue,
   interceptExpressResponse,
   startedResponse,
   waitForQuickResponse,
@@ -85,6 +86,25 @@ describe("computeResultFromResponse", () => {
   it.each([301, 400, 500])("fails a %i, leaving its body out", (status) => {
     expect(computeResultFromResponse(status, '{"stack":"at db.ts:12"}')).toEqual({
       status: "failed",
+    });
+  });
+});
+
+describe("computeResultFromValue", () => {
+  it("judges a Response by its status and body", async () => {
+    expect(await computeResultFromValue(Response.json({ frames: 1 }))).toEqual({
+      status: "completed",
+      result: { frames: 1 },
+    });
+    expect(
+      await computeResultFromValue(Response.json({}, { status: 400 })),
+    ).toEqual({ status: "failed" });
+  });
+
+  it("makes any other value the result", async () => {
+    expect(await computeResultFromValue({ frames: 1 })).toEqual({
+      status: "completed",
+      result: { frames: 1 },
     });
   });
 });
