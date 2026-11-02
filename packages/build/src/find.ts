@@ -7,7 +7,7 @@
  *    own tsconfig.json. The program is only analyzed. It is never emitted or
  *    run.
  * 2. `findDefineCalls` walks every source file and returns each call
- *    expression that TypeScript resolves to OUR `Services.define` method.
+ *    expression that TypeScript resolves to OUR `VarisServices.define` method.
  *
  * WHY MATCH BY DECLARATION INSTEAD OF BY NAME
  * Searching for the text "define(" would miss renamed instances like
@@ -25,7 +25,7 @@
  * - If @usevaris/sdk can't be resolved, or no file imports it (so it isn't
  *   in the program), there are zero define calls. The build then succeeds
  *   and writes an EMPTY services list.
- * - If the SDK resolves but has no `Services` class with a `define` method,
+ * - If the SDK resolves but has no `VarisServices` class with a `define` method,
  *   the install is broken (or the SDK changed shape). That is a fatal
  *   BuildFailure.
  * - Declaration files (.d.ts), files from node_modules, and the SDK's own
@@ -38,10 +38,11 @@
  *   monorepo), only calls to that one copy are found.
  *
  * !! COUPLING WITH packages/sdk/src/index.ts !!
- * `findSdkDefine` looks for a class named exactly `Services` with a method
- * named exactly `define`. If you rename either one in packages/sdk/src/index.ts, update
- * this file too, or every build will fail with "Found @usevaris/sdk but not
- * its define method." The same applies to the package name in `SDK_MODULE`,
+ * `findSdkDefine` looks for a class named exactly `VarisServices`, or
+ * `Services` in SDKs before 1.2.0, with a method named exactly `define`. If
+ * you rename either one in packages/sdk/src/index.ts, update
+ * `SDK_SERVICES_CLASSES` too, or every build will fail with "Found
+ * @usevaris/sdk but not its define method." The same applies to the package name in `SDK_MODULE`,
  * which must match `name` in packages/sdk/package.json.
  */
 import path from "node:path";
@@ -50,6 +51,16 @@ import { BuildFailure, fromDiagnostic } from "./errors.js";
 
 /** The package name developers import from. Must match package.json "name". */
 const SDK_MODULE = "@usevaris/sdk";
+
+/**
+ * The class that holds `define`. SDKs before 1.2.0 call it `Services`; it
+ * stays here because the CLI runs the newest generator against whatever SDK
+ * a project has installed.
+ */
+const SDK_SERVICES_CLASSES: ReadonlySet<string> = new Set([
+  "VarisServices",
+  "Services",
+]);
 
 /** Loads the developer's project through its tsconfig.json. Never runs their code. */
 export function loadProgram(projectDir: string): ts.Program {
@@ -151,7 +162,7 @@ export function findDefineCalls(program: ts.Program): ts.CallExpression[] {
 }
 
 /**
- * Locates `Services.define` in the copy of the SDK this project resolves.
+ * Locates `VarisServices.define` in the copy of the SDK this project resolves.
  *
  * Returns undefined when the project doesn't use the SDK at all. Throws
  * BuildFailure when the SDK is present but doesn't contain the expected
@@ -185,13 +196,14 @@ function findSdkDefine(program: ts.Program): ts.MethodDeclaration | undefined {
   const sdkFile = program.getSourceFile(resolved.resolvedFileName);
   if (!sdkFile) return undefined;
 
-  // Scan the SDK file's top-level statements for `class Services { define(...) }`.
-  // In an installed package this is dist/index.d.ts, where it appears as
-  // `declare class Services`. In this repo's tests, `paths` points at
+  // Scan the SDK file's top-level statements for
+  // `class VarisServices { define(...) }`. In an installed package this is
+  // dist/index.d.ts, where it appears as `declare class VarisServices`. In this repo's tests, `paths` points at
   // packages/sdk/src/index.ts instead. Both shapes are handled the same way.
   for (const statement of sdkFile.statements) {
     if (
-      !ts.isClassDeclaration(statement) || statement.name?.text !== "Services"
+      !ts.isClassDeclaration(statement) ||
+      !SDK_SERVICES_CLASSES.has(statement.name?.text ?? "")
     ) continue;
     for (const member of statement.members) {
       if (

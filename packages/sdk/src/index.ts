@@ -1,5 +1,5 @@
 import type { VarisRequest } from "./request-parts.js";
-import { Requests } from "./requests.js";
+import { VarisRequestHandler } from "./requests.js";
 import type { ServiceDefinition } from "./types.js";
 import type { VarisOptions } from "./verify.js";
 
@@ -22,7 +22,7 @@ export {
   type VarisPublicKey,
 } from "./verify.js";
 
-class Services {
+class VarisServices {
   /**
    * Declares a Varis service. Does nothing at runtime.
    *
@@ -39,12 +39,12 @@ class Services {
 let warnedAboutVerifyRequest = false;
 
 export class Varis {
-  readonly services = new Services();
-  readonly requests: Requests;
+  readonly services = new VarisServices();
+  readonly requests: VarisRequestHandler;
 
   /** `options` configures the SDK. Varis never needs a credential. */
   constructor(options: VarisOptions = {}) {
-    this.requests = new Requests(options);
+    this.requests = new VarisRequestHandler(options);
   }
 
   /**

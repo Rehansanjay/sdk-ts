@@ -17,7 +17,7 @@ varis-ts/
 ├── package.json            Private workspace root. Scripts run across packages.
 ├── tsconfig.base.json      Shared compiler options. Both packages extend it.
 ├── packages/sdk/
-│   ├── src/index.ts        Varis, Services, define, and the deprecated verifyRequest.
+│   ├── src/index.ts        Varis, VarisServices, define, and the deprecated verifyRequest.
 │   ├── src/types.ts        ServiceDefinition, ServiceType, ServiceStatus, ServiceCategory.
 │   ├── src/requests.ts     varis.requests: verify, handleOnServer, delegateToWorker, handleInWorker.
 │   ├── src/request-parts.ts  Reads a Web Request or a Node.js req the same way.
@@ -122,9 +122,11 @@ tests on every pull request.
   whatever copy of the SDK the developer's project resolves. In tests,
   `makeProject` maps `@usevaris/sdk` to `packages/sdk/src/index.ts` through
   `paths`.
-- `find.ts` looks for a class named `Services` with a method named `define`,
-  in a package named `@usevaris/sdk`. If you rename any of them, update
-  `find.ts` in the same change.
+- `find.ts` looks for a class named `VarisServices` with a method named
+  `define`, in a package named `@usevaris/sdk`. If you rename any of them,
+  update `find.ts` in the same change. It also accepts `Services`, the name
+  before 1.2.0, because the CLI runs the newest generator against whatever
+  SDK a project has. Never drop an old name from `find.ts`.
 - The output of `cli.ts` is a protocol that the Varis CLI and every other
   language's generator share. Don't change exit codes, streams, or JSON shapes
   without changing all of them together.

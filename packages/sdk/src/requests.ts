@@ -96,7 +96,7 @@ function readNextWaitUntil(): WaitUntil | undefined {
   return store?.waitUntil ? (promise) => store.waitUntil!(promise) : undefined;
 }
 
-export class Requests {
+export class VarisRequestHandler {
   readonly #verifier: RequestVerifier;
   readonly #records = new WeakMap<object, RequestRecord>();
   readonly #keysUrl: string | undefined;
