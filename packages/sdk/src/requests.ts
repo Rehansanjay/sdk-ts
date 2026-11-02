@@ -15,6 +15,7 @@
  * heartbeats always come from the process doing the work.
  */
 import { VARIS_API_ORIGIN } from "./constants.js";
+import { keepAliveUntilDone, type WaitUntil } from "./keep-alive.js";
 import {
   type Notification,
   readNotificationDetails,
@@ -41,8 +42,6 @@ import { RequestVerifier, type VarisOptions } from "./verify.js";
 /** How long `handleOnServer` waits for the work before answering `202 started`. */
 export const ACKNOWLEDGE_AFTER_MS = 20_000;
 
-type WaitUntil = (promise: Promise<unknown>) => void;
-
 /** What the SDK remembers about one request. */
 interface RequestRecord {
   /** What `verify` answered, shared by every later call. */
@@ -65,35 +64,6 @@ export function rememberVerification(
     records.set(request, record);
   }
   return record;
-}
-
-/**
- * Asks the platform to keep running until `promise` settles: the
- * `waitUntil` option first, then Next.js's request context. On a
- * long-running server there's nothing to ask, and the promise runs anyway.
- */
-export function keepAliveUntilDone(
-  promise: Promise<unknown>,
-  waitUntil?: WaitUntil,
-): void {
-  const hook = waitUntil ?? readNextWaitUntil();
-  try {
-    hook?.(promise);
-  } catch {
-    // Outside a request, the platform may refuse. The promise still runs.
-  }
-}
-
-/**
- * Next.js's `waitUntil` for the current request, documented with `after`
- * in node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md.
- */
-function readNextWaitUntil(): WaitUntil | undefined {
-  const context = (globalThis as Record<symbol, unknown>)[
-    Symbol.for("@next/request-context")
-  ] as { get?(): { waitUntil?: WaitUntil } | undefined } | undefined;
-  const store = context?.get?.();
-  return store?.waitUntil ? (promise) => store.waitUntil!(promise) : undefined;
 }
 
 export class VarisRequestHandler {

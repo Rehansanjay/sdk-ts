@@ -23,6 +23,7 @@ varis-ts/
 │   ├── src/request-parts.ts  Reads a Web Request or a Node.js req the same way.
 │   ├── src/notifications.ts  Sends started, running, completed, and failed to Varis.
 │   ├── src/responses.ts    Waits for the work's answer and captures a late Express one.
+│   ├── src/keep-alive.ts   Keeps a serverless function running until a long call's result is sent.
 │   ├── src/verify.ts       The signature check, VarisOptions, VarisKeyFetchError.
 │   ├── src/constants.ts    The Varis origin and the varis test loopback addresses.
 │   ├── docs/agents.md      Shipped instructions for coding agents in developers' projects.
