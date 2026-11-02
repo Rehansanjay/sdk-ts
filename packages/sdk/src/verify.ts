@@ -65,8 +65,8 @@ export interface VarisOptions {
   maxClockSkewSeconds?: number;
   /**
    * Keeps a serverless function running until a long call's result is
-   * sent, such as `waitUntil` from `@vercel/functions` or
-   * `cloudflare:workers`. Next.js needs none: the SDK finds its own.
+   * sent. Only for a serverless host the SDK doesn't detect: Vercel,
+   * Netlify Functions, Cloudflare Workers, and Next.js need none.
    */
   waitUntil?: (promise: Promise<unknown>) => void;
 }

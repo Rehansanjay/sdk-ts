@@ -75,9 +75,14 @@ await queue.add("render", {
 await varis.requests.handleInWorker(job.data.varis, () => render(job.data.input));
 ```
 
-Requests that aren't from Varis pass through untouched. On serverless
-platforms other than Next.js, pass the platform's `waitUntil` to
-`new Varis({ waitUntil })`. Keep results under 4 MB of JSON.
+Requests that aren't from Varis pass through untouched. Keep results under
+4 MB of JSON.
+
+The function must keep running until a long call's result is sent. Vercel
+(any framework), Netlify Functions, Cloudflare Workers, and Next.js on any
+host need no option, and neither does a long-running server. On another
+serverless host, pass its `waitUntil` to `new Varis({ waitUntil })`. On AWS
+Lambda directly, use `delegateToWorker` and a queue.
 
 ## Documentation
 

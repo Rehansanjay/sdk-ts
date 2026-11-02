@@ -266,11 +266,16 @@ router.post("/render", async (req, res) => {
   error, fails the call, and the agent isn't charged. Varis never sees the
   error or the body of a failed answer.
 - An answer that has started streaming before 20 seconds is left alone.
-- The process must keep running until the work ends. On Vercel, export
-  `maxDuration`. Next.js needs nothing else. On other serverless platforms,
-  pass the platform's `waitUntil`, such as
-  `new Varis({ waitUntil })` with `waitUntil` from `@vercel/functions` or
-  `cloudflare:workers`.
+- The process must keep running until the work ends. The SDK asks the
+  platform to keep it running, with no option, on Vercel (any framework),
+  Netlify Functions, Cloudflare Workers, and Next.js on any host. On Vercel,
+  also export `maxDuration`. A long-running server, such as Express on a VM
+  or in a container, needs nothing.
+- On any other serverless host, pass the host's `waitUntil` once:
+  `new Varis({ waitUntil })`. Don't pass it on the platforms above.
+- On AWS Lambda without one of those platforms, the function stops once it
+  answers. Use `requests.delegateToWorker` and a queue instead of
+  `handleOnServer`.
 
 ### The work runs in a queue worker
 

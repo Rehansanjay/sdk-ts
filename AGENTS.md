@@ -23,7 +23,7 @@ varis-ts/
 │   ├── src/request-parts.ts  Reads a Web Request or a Node.js req the same way.
 │   ├── src/notifications.ts  Sends started, running, completed, and failed to Varis.
 │   ├── src/responses.ts    Waits for the work's answer and captures a late Express one.
-│   ├── src/keep-alive.ts   Keeps a serverless function running until a long call's result is sent.
+│   ├── src/keep-alive.ts   Finds each platform's waitUntil: Next.js, Vercel, Netlify, Cloudflare.
 │   ├── src/verify.ts       The signature check, VarisOptions, VarisKeyFetchError.
 │   ├── src/constants.ts    The Varis origin and the varis test loopback addresses.
 │   ├── docs/agents.md      Shipped instructions for coding agents in developers' projects.
@@ -96,6 +96,11 @@ tests on every pull request.
   the route in `app/api/v1/invocations/[invocation_id]/notifications/` and
   `PROVIDER_TIMEOUT_MS` in `app/api/v1/invocations/_lib/provider.ts`. If you
   change one, change the other.
+- Never write the literal `"cloudflare:workers"` in `packages/sdk/src`, and
+  keep its import in `src/keep-alive.ts` behind the bundler-ignore comments.
+  Next.js and Vite builds of a Node provider would otherwise try to resolve
+  it. The platform symbols in `src/keep-alive.ts` are other packages'
+  internals: re-check them when those packages change.
 - `LOCAL_TEST_NOTIFICATIONS_URL` and `LOCAL_TEST_KEY_URL` in
   `src/constants.ts` must match the `varis test` listener in the `cli`
   repository.

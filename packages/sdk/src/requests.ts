@@ -15,7 +15,11 @@
  * heartbeats always come from the process doing the work.
  */
 import { VARIS_API_ORIGIN } from "./constants.js";
-import { keepAliveUntilDone, type WaitUntil } from "./keep-alive.js";
+import {
+  keepAliveUntilDone,
+  loadCloudflareWaitUntil,
+  type WaitUntil,
+} from "./keep-alive.js";
 import {
   type Notification,
   readNotificationDetails,
@@ -88,6 +92,8 @@ export class VarisRequestHandler {
    * `VarisKeyFetchError` only when the signing keys can't be loaded.
    */
   verify(request: VarisRequest): Promise<boolean> {
+    // Ready before handleOnServer needs it, on Workers only.
+    void loadCloudflareWaitUntil();
     const record = rememberVerification(this.#records, request);
     record.isVaris ??= this.#verifier.verify(readRequestParts(request));
     return record.isVaris;
