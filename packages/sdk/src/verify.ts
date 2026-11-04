@@ -3,11 +3,16 @@
  *
  * SIGNING FORMAT (must match lib/crypto/signing.ts in the private varis repo)
  * - `x-varis-timestamp`: Unix time in whole seconds.
+ * - `x-varis-invocation-id`: the invocation the request is for.
  * - `x-varis-signature`: base64 Ed25519 signature over the UTF-8 bytes of
- *   `${timestamp}.${method}.${pathAndQuery}.${rawBody}`, where `method` is
- *   GET or POST, `pathAndQuery` is the request path and query exactly as
- *   received (no host), and `rawBody` is empty for GET.
+ *   `${timestamp}.${invocationId}.${method}.${pathAndQuery}.${rawBody}`,
+ *   where `method` is GET or POST, `pathAndQuery` is the request path and
+ *   query exactly as received (no host), and `rawBody` is empty for GET.
  * - `x-varis-key-id`: the `kid` of the key that signed it.
+ *
+ * Until 2.0.0, a request that fails that check, or has no invocation ID, is
+ * also checked against the string the gateway signed before the invocation
+ * ID was added: `${timestamp}.${method}.${pathAndQuery}.${rawBody}`.
  *
  * The path and query are signed so a captured request can't be replayed to
  * another endpoint or with a changed query. The host isn't, so a proxy that
@@ -41,6 +46,7 @@ import {
   TEST_REQUEST_ID_PREFIX,
   VARIS_SIGNING_KEYS_URL,
 } from "./constants.js";
+import type { RequestParts } from "./request-parts.js";
 
 /** One public key, in the shape the signing keys endpoint returns. */
 export interface VarisPublicKey {
@@ -49,7 +55,7 @@ export interface VarisPublicKey {
   public_key_pem: string;
 }
 
-/** Request verification settings. Varis never needs a credential. */
+/** The SDK's settings. Varis never needs a credential. */
 export interface VarisOptions {
   /** Where to fetch signing keys from. Defaults to the Varis API. For local development. */
   keysUrl?: string;
@@ -57,6 +63,12 @@ export interface VarisOptions {
   publicKeys?: VarisPublicKey[];
   /** How far a request's timestamp may be from now, in seconds. Defaults to 300. */
   maxClockSkewSeconds?: number;
+  /**
+   * Keeps a serverless function running until a long call's result is
+   * sent. Only for a serverless host the SDK doesn't detect: Vercel,
+   * Netlify Functions, Cloudflare Workers, and Next.js need none.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 /** Thrown when the signing keys can't be loaded. Respond with 500, not 401. */
@@ -94,10 +106,10 @@ export class RequestVerifier {
       DEFAULT_MAX_CLOCK_SKEW_SECONDS;
   }
 
-  async verify(request: Request): Promise<boolean> {
-    const signatureHeader = request.headers.get("x-varis-signature");
-    const timestampHeader = request.headers.get("x-varis-timestamp");
-    const kid = request.headers.get("x-varis-key-id");
+  async verify(request: RequestParts): Promise<boolean> {
+    const signatureHeader = request.header("x-varis-signature");
+    const timestampHeader = request.header("x-varis-timestamp");
+    const kid = request.header("x-varis-key-id");
     if (!signatureHeader || !timestampHeader) return false;
 
     if (!/^\d+$/.test(timestampHeader)) return false;
@@ -107,17 +119,13 @@ export class RequestVerifier {
     const signature = decodeBase64(signatureHeader);
     if (!signature || signature.length !== SIGNATURE_BYTES) return false;
 
-    if (request.bodyUsed) {
-      throw new TypeError("Call verifyRequest before reading the request body.");
-    }
-    // Read a clone, so the caller can still read the original body.
-    const body = new Uint8Array(await request.clone().arrayBuffer());
+    const body = await request.readBody();
 
     // A test request carries both markers; a gateway request carries
     // neither. The request ID isn't signed, so it only routes and
     // cross-checks: the signature, against a key only the local CLI holds,
     // is what proves the request.
-    const requestId = request.headers.get("x-varis-request-id") ?? "";
+    const requestId = request.header("x-varis-request-id") ?? "";
     const isTestKey = kid === TEST_KEY_ID;
     if (isTestKey !== requestId.startsWith(TEST_REQUEST_ID_PREFIX)) {
       return false;
@@ -128,28 +136,10 @@ export class RequestVerifier {
       : await this.#key(kid);
     if (!key) return false;
 
-    // The signed bytes are UTF-8
-    // `${timestamp}.${method}.${pathAndQuery}.${rawBody}`. The path and
-    // query come from the URL as received, still percent-encoded. The body
-    // is used byte for byte, never decoded and re-encoded.
-    const url = new URL(request.url);
-    const prefix = encoder.encode(
-      `${timestampHeader}.${request.method}.${url.pathname}${url.search}.`,
-    );
-    const signed = new Uint8Array(prefix.length + body.length);
-    signed.set(prefix);
-    signed.set(body, prefix.length);
-
-    try {
-      return await crypto.subtle.verify(
-        { name: "Ed25519" },
-        key,
-        signature,
-        signed,
-      );
-    } catch {
-      return false;
+    for (const prefix of signedPrefixes(request, timestampHeader)) {
+      if (await verifySignature(key, signature, prefix, body)) return true;
     }
+    return false;
   }
 
   /**
@@ -210,6 +200,45 @@ export class RequestVerifier {
     }
     this.#keys = keys;
     this.#loaded = true;
+  }
+}
+
+/** Whether a request is signed with the `varis test` key, not a gateway key. */
+export function isTestRequest(request: RequestParts): boolean {
+  return request.header("x-varis-key-id") === TEST_KEY_ID;
+}
+
+/**
+ * What may precede the body in the signed bytes, newest first. The path and
+ * query are as received, still percent-encoded. Remove the old string in
+ * 2.0.0.
+ */
+function signedPrefixes(request: RequestParts, timestamp: string): string[] {
+  const invocationId = request.header("x-varis-invocation-id");
+  const old = `${timestamp}.${request.method}.${request.pathAndQuery}.`;
+  return invocationId
+    ? [
+      `${timestamp}.${invocationId}.${request.method}.${request.pathAndQuery}.`,
+      old,
+    ]
+    : [old];
+}
+
+/** Checks the signature over the prefix and the body, byte for byte. */
+async function verifySignature(
+  key: CryptoKey,
+  signature: Uint8Array<ArrayBuffer>,
+  prefix: string,
+  body: Uint8Array,
+): Promise<boolean> {
+  const head = encoder.encode(prefix);
+  const signed = new Uint8Array(head.length + body.length);
+  signed.set(head);
+  signed.set(body, head.length);
+  try {
+    return await crypto.subtle.verify({ name: "Ed25519" }, key, signature, signed);
+  } catch {
+    return false;
   }
 }
 

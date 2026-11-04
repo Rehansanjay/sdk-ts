@@ -1,7 +1,7 @@
 {
   "name": "@usevaris/sdk",
   "version": "0.1.0",
-  "description": "Declare Varis services in TypeScript and verify requests from the Varis gateway.",
+  "description": "Declare Varis services in TypeScript, verify requests from the Varis gateway, and report on long calls.",
   "license": "MIT",
   "type": "module",
   "exports": {

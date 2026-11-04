@@ -469,6 +469,40 @@ ${fields("renamed")}
     expect(build(dir).services).toEqual(["renamed"]);
   });
 
+  it("finds define in an SDK from before 1.2.0, where the class is Services", () => {
+    const types = path.resolve(import.meta.dirname, "../../sdk/src/types.ts");
+    const dir = makeProject({
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          module: "nodenext",
+          target: "es2022",
+          noEmit: true,
+          skipLibCheck: true,
+          types: [],
+          paths: { "@usevaris/sdk": ["./sdk-1.1/index.d.ts"] },
+        },
+        include: ["src"],
+      }),
+      // The shape of @usevaris/sdk 1.1.0's dist/index.d.ts.
+      "sdk-1.1/index.d.ts": `
+import type { ServiceDefinition } from ${JSON.stringify(types)};
+declare class Services {
+  define<Input, Output>(definition: ServiceDefinition): void;
+}
+export declare class Varis {
+  readonly services: Services;
+}`,
+      "src/route.ts": `
+import { Varis } from "@usevaris/sdk";
+new Varis().services.define<{ a: string }, string>({
+${fields("legacy")}
+});`,
+    });
+
+    expect(build(dir).services).toEqual(["legacy"]);
+  });
+
   it("ignores a lookalike define", () => {
     const dir = makeProject({
       "src/route.ts": `

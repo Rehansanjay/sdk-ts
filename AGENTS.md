@@ -7,7 +7,7 @@ download the TypeScript compiler.
 
 | Package | Directory | Purpose |
 | --- | --- | --- |
-| `@usevaris/sdk` | `packages/sdk` | Runs in the developer's server. Exports `Varis`, `services.define`, and `verifyRequest`. |
+| `@usevaris/sdk` | `packages/sdk` | Runs in the developer's server. Exports `Varis`, with `services.define` and `varis.requests`. |
 | `@usevaris/build` | `packages/build` | The generator. The Varis CLI runs it on demand with `npx --yes @usevaris/build@<major>`. Developers never install it. |
 
 ## Layout
@@ -17,10 +17,15 @@ varis-ts/
 ├── package.json            Private workspace root. Scripts run across packages.
 ├── tsconfig.base.json      Shared compiler options. Both packages extend it.
 ├── packages/sdk/
-│   ├── src/index.ts        Varis, Services, and define.
+│   ├── src/index.ts        Varis, VarisServices, define, and the deprecated verifyRequest.
 │   ├── src/types.ts        ServiceDefinition, ServiceType, ServiceStatus, ServiceCategory.
-│   ├── src/verify.ts       verifyRequest, VarisOptions, VarisKeyFetchError.
-│   ├── src/constants.ts    VARIS_API_ORIGIN and VARIS_SIGNING_KEYS_URL.
+│   ├── src/requests.ts     varis.requests: verify, handleOnServer, delegateToWorker, handleInWorker.
+│   ├── src/request-parts.ts  Reads a Web Request or a Node.js req the same way.
+│   ├── src/notifications.ts  Sends started, running, completed, and failed to Varis.
+│   ├── src/responses.ts    Waits for the work's answer and captures a late Express one.
+│   ├── src/keep-alive.ts   Finds each platform's waitUntil: Next.js, Vercel, Netlify, Cloudflare.
+│   ├── src/verify.ts       The signature check, VarisOptions, VarisKeyFetchError.
+│   ├── src/constants.ts    The Varis origin and the varis test loopback addresses.
 │   ├── docs/agents.md      Shipped instructions for coding agents in developers' projects.
 │   └── test/
 └── packages/build/
@@ -77,12 +82,28 @@ tests on every pull request.
   later, Deno, Bun, and Cloudflare Workers. Its `tsconfig.json` sets
   `"types": []` so that Node-only APIs fail to type check.
 - Keep the Varis hostname in `packages/sdk/src/constants.ts` only.
-- `Varis` never holds a credential. Its options configure request verification
-  only.
+- `Varis` never holds a credential. Its options configure request
+  verification, plus `waitUntil` for serverless platforms. The notification
+  token arrives with each request and lives only as long as that call.
+- Type a Node.js `req` and `res` structurally in `src/request-parts.ts`, so
+  an Express `req` and `res` are assignable without Node or Express types.
 - The signing format in `src/verify.ts` must match the gateway in the private
   `varis` repository (`lib/crypto/signing.ts` and
   `app/.well-known/varis-signing-keys/route.ts`). If you change one, change
   the other.
+- The notification format and timings in `src/notifications.ts` and
+  `src/requests.ts` must match the gateway in the private `varis` repository:
+  the route in `app/api/v1/invocations/[invocation_id]/notifications/` and
+  `PROVIDER_TIMEOUT_MS` in `app/api/v1/invocations/_lib/provider.ts`. If you
+  change one, change the other.
+- Never write the literal `"cloudflare:workers"` in `packages/sdk/src`, and
+  keep its import in `src/keep-alive.ts` behind the bundler-ignore comments.
+  Next.js and Vite builds of a Node provider would otherwise try to resolve
+  it. The platform symbols in `src/keep-alive.ts` are other packages'
+  internals: re-check them when those packages change.
+- `LOCAL_TEST_NOTIFICATIONS_URL` and `LOCAL_TEST_KEY_URL` in
+  `src/constants.ts` must match the `varis test` listener in the `cli`
+  repository.
 - Change `packages/sdk/docs/agents.md` in the same commit as any public API
   change.
 - `packages/build/src/flat-input.ts` must match `lib/schema/flat-input.ts`
@@ -107,9 +128,11 @@ tests on every pull request.
   whatever copy of the SDK the developer's project resolves. In tests,
   `makeProject` maps `@usevaris/sdk` to `packages/sdk/src/index.ts` through
   `paths`.
-- `find.ts` looks for a class named `Services` with a method named `define`,
-  in a package named `@usevaris/sdk`. If you rename any of them, update
-  `find.ts` in the same change.
+- `find.ts` looks for a class named `VarisServices` with a method named
+  `define`, in a package named `@usevaris/sdk`. If you rename any of them,
+  update `find.ts` in the same change. It also accepts `Services`, the name
+  before 1.2.0, because the CLI runs the newest generator against whatever
+  SDK a project has. Never drop an old name from `find.ts`.
 - The output of `cli.ts` is a protocol that the Varis CLI and every other
   language's generator share. Don't change exit codes, streams, or JSON shapes
   without changing all of them together.

@@ -1,6 +1,14 @@
+import type { VarisRequest } from "./request-parts.js";
+import { VarisRequestHandler } from "./requests.js";
 import type { ServiceDefinition } from "./types.js";
-import { RequestVerifier, type VarisOptions } from "./verify.js";
+import type { VarisOptions } from "./verify.js";
 
+export type { VarisNotificationDetails } from "./notifications.js";
+export type {
+  NodeRequest,
+  NodeResponse,
+  VarisRequest,
+} from "./request-parts.js";
 export type {
   ServiceCategory,
   ServiceDefinition,
@@ -14,7 +22,7 @@ export {
   type VarisPublicKey,
 } from "./verify.js";
 
-class Services {
+class VarisServices {
   /**
    * Declares a Varis service. Does nothing at runtime.
    *
@@ -27,23 +35,30 @@ class Services {
   }
 }
 
-export class Varis {
-  readonly services = new Services();
-  readonly #verifier: RequestVerifier;
+/** Set once the deprecation warning for `verifyRequest` has been logged. */
+let warnedAboutVerifyRequest = false;
 
-  /** `options` holds request verification settings only. Varis never needs a credential. */
+export class Varis {
+  readonly services = new VarisServices();
+  readonly requests: VarisRequestHandler;
+
+  /** `options` configures the SDK. Varis never needs a credential. */
   constructor(options: VarisOptions = {}) {
-    this.#verifier = new RequestVerifier(options);
+    this.requests = new VarisRequestHandler(options);
   }
 
   /**
-   * Checks that `request` was signed by the Varis gateway. Call it before you
-   * read the body. The body stays readable afterward.
-   *
-   * Resolves to false for any invalid or unsigned request. Rejects with
-   * `VarisKeyFetchError` only when the signing keys can't be loaded.
+   * @deprecated Use `varis.requests.verify`, which takes the same request.
+   * Will be removed in January 2027.
    */
-  verifyRequest(request: Request): Promise<boolean> {
-    return this.#verifier.verify(request);
+  verifyRequest(request: VarisRequest): Promise<boolean> {
+    if (!warnedAboutVerifyRequest) {
+      warnedAboutVerifyRequest = true;
+      console.warn(
+        "Varis: verifyRequest is deprecated and will be removed in January 2027. " +
+          "Use varis.requests.verify instead.",
+      );
+    }
+    return this.requests.verify(request);
   }
 }
